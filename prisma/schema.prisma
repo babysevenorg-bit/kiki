@@ -1,0 +1,133 @@
+// Kiki backend schema — designed to be portable between SQLite (dev) and Neon Postgres (prod on Vercel).
+// When deploying to Vercel + Neon, switch provider to "postgresql" and set DATABASE_URL to your Neon connection string.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // For Vercel/Neon, change this to "postgresql" and set DATABASE_URL=postgres://...
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Wallpaper {
+  id          String   @id @default(cuid())
+  title       String
+  // Full-resolution image URL (object storage / CDN)
+  imageUrl    String
+  // Smaller preview / thumbnail URL used in lists (keeps React Native fast)
+  thumbUrl    String
+  // Free-form category label, e.g. "Abstract", "Nature", "Anime", "Minimal"
+  category    String
+  // Tags stored as a JSON string array, e.g. '["dark","mountains","4k"]'
+  tags        String   @default("[]")
+  // Resolution string for display, e.g. "3840x2160"
+  resolution  String   @default("1080x1920")
+  fileSizeKb  Int      @default(0)
+  // "portrait" | "landscape" | "square" — drives how RN renders the preview
+  orientation String   @default("portrait")
+  // True when the wallpaper should appear on the home featured rail
+  featured    Boolean  @default(false)
+  // True when the wallpaper is publicly visible in the RN app
+  active      Boolean  @default(true)
+  downloads   Int      @default(0)
+  // Optional: source attribution (Unsplash, Pexels, AI, etc.)
+  source      String   @default("kiki-studio")
+  // Optional: hex color used for the gradient placeholder before image loads
+  accentColor String   @default("#0f172a")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category, active])
+  @@index([featured, active])
+  @@index([updatedAt])
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  // Emoji or icon name shown in the RN chip
+  icon      String   @default("✨")
+  // Curated accent color for the chip gradient
+  accent    String   @default("#ec4899")
+  active    Boolean  @default(true)
+  // Denormalized count for fast rendering; updated by the API on wallpaper create/delete
+  count     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active])
+}
+
+// Tracks downloads so we can compute "trending" + show counts. Anonymous by device id.
+model DownloadEvent {
+  id          String   @id @default(cuid())
+  wallpaperId String
+  deviceId    String
+  createdAt   DateTime @default(now())
+
+  @@index([wallpaperId])
+  @@index([deviceId, createdAt])
+  @@index([createdAt])
+}
+
+// Per-device rotation config (the "wallpaper rotation tool" in the RN app syncs here)
+model RotationConfig {
+  id            String   @id @default(cuid())
+  deviceId      String   @unique
+  // JSON array of wallpaper ids, up to 8
+  wallpaperIds  String   @default("[]")
+  // Seconds between swaps (1, 5, 30, 60, 300, 600, ...)
+  intervalSec   Int      @default(60)
+  // Optional: only rotate between these hours (24h). Default = always
+  activeFrom    Int      @default(0)
+  activeTo      Int      @default(24)
+  // Optional: randomize order vs sequential
+  shuffle       Boolean  @default(false)
+  // Last time the device reported swapping (for analytics)
+  lastSwapAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([deviceId])
+}
+
+// AI lockscreen buddy prompts / generations — stored so users can recall them across devices
+model AiPrompt {
+  id         String   @id @default(cuid())
+  deviceId   String
+  // The user-visible prompt text, e.g. "draw me a calm rainy night cityscape"
+  prompt     String
+  // pending | completed | failed
+  status     String   @default("pending")
+  // Generated image URL when status = completed
+  resultUrl  String?
+  // Optional wallpaper id if the user saved the result as a wallpaper
+  wallpaperId String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([deviceId, createdAt])
+  @@index([status])
+}
+
+// Keep the demo User/Post models so the scaffold keeps working if you query them.
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Post {
+  id        String   @id @default(cuid())
+  title     String
+  content   String?
+  published Boolean  @default(false)
+  authorId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
