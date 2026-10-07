@@ -58,21 +58,16 @@ export async function POST(req: NextRequest) {
 
     // Lazy upsert category row
     const slug = category.toLowerCase().replace(/\s+/g, "-")
-    await withDbRetry(() =>
-      db.category
+    await withDbRetry(async () => {
+      const count = await db.wallpaper.count({ where: { category, active: true } })
+      await db.category
         .upsert({
           where: { slug },
-          create: {
-            name: category,
-            slug,
-            count: await db.wallpaper.count({ where: { category, active: true } }),
-          },
-          update: {
-            count: await db.wallpaper.count({ where: { category, active: true } }),
-          },
+          create: { name: category, slug, count },
+          update: { count },
         })
-        .catch(() => undefined),
-    )
+        .catch(() => undefined)
+    })
 
     broadcast({ type: "wallpaper.created", id: wallpaper.id, ts: Date.now() })
     return NextResponse.json(ok({ id: wallpaper.id, created: true }))
@@ -142,25 +137,18 @@ export async function PATCH(req: NextRequest) {
 
     if (typeof body.category === "string") {
       const slug = body.category.toLowerCase().replace(/\s+/g, "-")
-      await withDbRetry(() =>
-        db.category
+      await withDbRetry(async () => {
+        const count = await db.wallpaper.count({
+          where: { category: body.category, active: true },
+        })
+        await db.category
           .upsert({
             where: { slug },
-            create: {
-              name: body.category,
-              slug,
-              count: await db.wallpaper.count({
-                where: { category: body.category, active: true },
-              }),
-            },
-            update: {
-              count: await db.wallpaper.count({
-                where: { category: body.category, active: true },
-              }),
-            },
+            create: { name: body.category, slug, count },
+            update: { count },
           })
-          .catch(() => undefined),
-      )
+          .catch(() => undefined)
+      })
     }
 
     broadcast({ type: "wallpaper.updated", id: updated.id, ts: Date.now() })
