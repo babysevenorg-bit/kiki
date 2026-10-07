@@ -50,5 +50,25 @@ test
 prompt
 
 server.log
-# Skills directory
+
+# Skills directory (sandbox-only)
 /skills/
+
+# Sandbox orchestration (sandbox-only)
+/.zscripts/
+/Caddyfile
+
+# Local SQLite db (we use Neon Postgres in prod)
+/db/*.db
+/db/*.db-journal
+
+# Local downloads folder (regenerated)
+/download/
+
+# Vercel
+.vercel
+
+# OS / IDE
+.idea/
+.vscode/
+*.swp
