@@ -93,3 +93,7 @@ See [DEPLOY.md](./DEPLOY.md) for the full guide. Short version:
 - Server-side image resizing via Vercel Edge Functions
 - User accounts for cross-device sync of favorites + rotation configs
 - AI lockscreen buddy — text-to-prompt wallpaper generation, stored in the `AiPrompt` table
+
+## React Native app
+
+The Expo mobile app is in [`mobile/`](./mobile/). Its API adapter connects to this repo's Vercel endpoints for catalog data and live updates, and it includes a 10-wallpaper offline fallback. See [`mobile/README.md`](./mobile/README.md) for Expo Go and Android APK build steps.
