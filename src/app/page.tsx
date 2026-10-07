@@ -12,17 +12,25 @@ import {
   ImagePlus,
   LayoutGrid,
   Loader2,
+  LogOut,
   Pencil,
   Plus,
   RefreshCw,
   Search,
+  Shield,
   Sparkles,
   Star,
   StarOff,
   Trash2,
+  Upload,
+  User as UserIcon,
   Wifi,
   X,
 } from "lucide-react"
+
+import { AuthModal, type SessionUser } from "@/components/kiki/auth-modal"
+import { UploadModal } from "@/components/kiki/upload-modal"
+import { PendingTab } from "@/components/kiki/pending-tab"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -74,6 +82,8 @@ type PublicWallpaper = {
   accentColor: string
   createdAt: string
   updatedAt: string
+  status?: string
+  uploadedById?: string | null
 }
 
 type ApiListResponse<T> = { ok: true; data: T } | { ok: false; error: string }
@@ -153,6 +163,61 @@ export default function Page() {
   const [generating, setGenerating] = useState(false)
   const [sseConnected, setSseConnected] = useState(false)
   const [lastEvent, setLastEvent] = useState<string>("—")
+
+  // Auth + upload state
+  const [user, setUser] = useState<SessionUser | null>(null)
+  const [authOpen, setAuthOpen] = useState(false)
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [myUploads, setMyUploads] = useState<PublicWallpaper[]>([])
+  const [myUploadsLoading, setMyUploadsLoading] = useState(false)
+  const [pendingSignal, setPendingSignal] = useState(0)
+  const isAdmin = user?.role === "admin"
+
+  // Fetch session on mount
+  useEffect(() => {
+    void (async () => {
+      try {
+        const data = await apiFetch<{ user: SessionUser | null }>("/api/auth/me")
+        if (data.user) setUser(data.user)
+      } catch {
+        // ignore — user just stays unsigned-in
+      }
+    })()
+  }, [])
+
+  // Fetch user's own uploads whenever they sign in
+  const refreshMyUploads = useCallback(async () => {
+    if (!user) {
+      setMyUploads([])
+      return
+    }
+    setMyUploadsLoading(true)
+    try {
+      const data = await apiFetch<{ items: PublicWallpaper[] }>(
+        "/api/users/me/uploads",
+      )
+      setMyUploads(data.items)
+    } catch (e) {
+      // silent — likely just not signed in
+    } finally {
+      setMyUploadsLoading(false)
+    }
+  }, [user])
+
+  useEffect(() => {
+    void refreshMyUploads()
+  }, [refreshMyUploads])
+
+  async function signOut() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" })
+      setUser(null)
+      setMyUploads([])
+      toast.success("Signed out")
+    } catch (e) {
+      toast.error(`Sign out failed: ${(e as Error).message}`)
+    }
+  }
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -366,6 +431,17 @@ export default function Page() {
         <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         <span className="hidden sm:inline">Refresh</span>
       </Button>
+      {user && (
+        <Button
+          variant="outline"
+          onClick={() => setUploadOpen(true)}
+          className="h-10"
+          title="Upload your own wallpaper"
+        >
+          <Upload className="h-4 w-4" />
+          <span className="hidden sm:inline">Upload</span>
+        </Button>
+      )}
       <Button
         variant="default"
         onClick={() => setCreating(true)}
@@ -567,6 +643,47 @@ export default function Page() {
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
               <span>Refresh</span>
             </Button>
+            {user ? (
+              <div className="flex items-center gap-2">
+                {isAdmin && (
+                  <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                    <Shield className="h-3 w-3 mr-1" />
+                    Admin
+                  </Badge>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-2"
+                  title={user.email}
+                >
+                  <div className="h-6 w-6 rounded-full kiki-gradient grid place-items-center">
+                    <UserIcon className="h-3 w-3 text-white" />
+                  </div>
+                  <span className="max-w-[120px] truncate text-xs">
+                    {user.displayName ?? user.email}
+                  </span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={signOut}
+                  className="h-8"
+                  title="Sign out"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ) : (
+              <Button
+                size="sm"
+                onClick={() => setAuthOpen(true)}
+                className="h-8 kiki-gradient text-white hover:opacity-90"
+              >
+                <UserIcon className="h-3.5 w-3.5" />
+                <span>Sign in</span>
+              </Button>
+            )}
           </div>
           {livePill}
         </div>
@@ -604,11 +721,23 @@ export default function Page() {
         {statsCards}
 
         <Tabs defaultValue="catalog" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 sm:max-w-md">
+          <TabsList className={`grid w-full ${user ? (isAdmin ? "grid-cols-4 sm:max-w-2xl" : "grid-cols-3 sm:max-w-lg") : "grid-cols-2 sm:max-w-md"}`}>
             <TabsTrigger value="catalog" className="text-xs sm:text-sm">
               <LayoutGrid className="h-3.5 w-3.5 mr-1.5" />
               Catalog
             </TabsTrigger>
+            {user && (
+              <TabsTrigger value="my-uploads" className="text-xs sm:text-sm">
+                <Upload className="h-3.5 w-3.5 mr-1.5" />
+                My Uploads
+              </TabsTrigger>
+            )}
+            {isAdmin && (
+              <TabsTrigger value="pending" className="text-xs sm:text-sm">
+                <Shield className="h-3.5 w-3.5 mr-1.5" />
+                Pending
+              </TabsTrigger>
+            )}
             <TabsTrigger value="settings" className="text-xs sm:text-sm">
               <Activity className="h-3.5 w-3.5 mr-1.5" />
               Settings
@@ -630,6 +759,100 @@ export default function Page() {
             </div>
           </TabsContent>
 
+          {user && (
+            <TabsContent value="my-uploads" className="mt-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold">Your uploads</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Wallpapers you've submitted. Pending ones are awaiting
+                    admin approval.
+                  </p>
+                </div>
+                <Button
+                  onClick={() => setUploadOpen(true)}
+                  className="kiki-gradient text-white hover:opacity-90"
+                >
+                  <Upload className="h-4 w-4 mr-1" />
+                  Upload new
+                </Button>
+              </div>
+              {myUploadsLoading ? (
+                <div className="grid place-items-center py-20">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                </div>
+              ) : myUploads.length === 0 ? (
+                <div className="grid place-items-center py-20 text-center">
+                  <div className="kiki-gradient h-14 w-14 rounded-2xl grid place-items-center mb-4">
+                    <ImagePlus className="h-7 w-7 text-white" />
+                  </div>
+                  <p className="text-lg font-semibold">No uploads yet</p>
+                  <p className="text-sm text-muted-foreground mt-1 mb-4 max-w-md">
+                    Click "Upload new" to share your first wallpaper with the
+                    Kiki community.
+                  </p>
+                  <Button
+                    onClick={() => setUploadOpen(true)}
+                    className="kiki-gradient text-white hover:opacity-90"
+                  >
+                    <Upload className="h-4 w-4 mr-1" />
+                    Upload your first wallpaper
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
+                  {myUploads.map((w) => (
+                    <Card
+                      key={w.id}
+                      className="group overflow-hidden border-border/70 p-0 gap-0"
+                    >
+                      <div className="relative aspect-[9/16] overflow-hidden bg-muted">
+                        { }
+                        <img
+                          src={w.thumbUrl}
+                          alt={w.title}
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                        <div className="absolute inset-x-0 top-0 p-2 flex items-start justify-between">
+                          {w.status === "pending" && (
+                            <Badge className="bg-amber-500/90 text-white border-0">
+                              Pending
+                            </Badge>
+                          )}
+                          {w.status === "published" && (
+                            <Badge className="bg-emerald-500/90 text-white border-0">
+                              Published
+                            </Badge>
+                          )}
+                          {w.status === "rejected" && (
+                            <Badge className="bg-rose-500/90 text-white border-0">
+                              Rejected
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/80 via-black/40 to-transparent">
+                          <div className="text-white text-xs font-semibold line-clamp-1">
+                            {w.title}
+                          </div>
+                          <div className="text-white/70 text-[10px]">
+                            {w.category}
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+          )}
+
+          {isAdmin && (
+            <TabsContent value="pending" className="mt-4 space-y-4">
+              <PendingTab refreshSignal={pendingSignal} />
+            </TabsContent>
+          )}
+
           <TabsContent value="settings" className="mt-4 space-y-4">
             <div className="grid gap-4 lg:grid-cols-2">
               {apiDocs}
@@ -646,7 +869,10 @@ export default function Page() {
               <GeneratePanel
                 busy={generating}
                 onBusyChange={setGenerating}
-                onSaved={() => void refresh()}
+                onSaved={() => {
+                  void refresh()
+                  setPendingSignal((s) => s + 1)
+                }}
               />
             </Card>
           </TabsContent>
@@ -688,6 +914,25 @@ export default function Page() {
         onSaved={() => {
           setCreating(false)
           void refresh()
+        }}
+      />
+
+      {/* Auth + Upload modals */}
+      <AuthModal
+        open={authOpen}
+        onClose={() => setAuthOpen(false)}
+        onAuthenticated={(u) => {
+          setUser(u)
+          void refreshMyUploads()
+          if (u.role === "admin") setPendingSignal((s) => s + 1)
+        }}
+      />
+      <UploadModal
+        open={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        onUploaded={() => {
+          void refreshMyUploads()
+          setPendingSignal((s) => s + 1)
         }}
       />
     </div>

@@ -17,7 +17,7 @@ datasource db {
 model Wallpaper {
   id          String   @id @default(cuid())
   title       String
-  // Full-resolution image URL (object storage / CDN)
+  // Full-resolution image URL — for user uploads this points to /api/blobs/[id]
   imageUrl    String
   // Smaller preview / thumbnail URL used in lists (keeps React Native fast)
   thumbUrl    String
@@ -37,16 +37,40 @@ model Wallpaper {
   // True when the wallpaper is publicly visible in the RN app
   active      Boolean  @default(true)
   downloads   Int      @default(0)
-  // Optional: source attribution (Unsplash, Pexels, AI, etc.)
+  // Optional: source attribution (Unsplash, Pexels, AI, user-upload, etc.)
   source      String   @default("kiki-studio")
   // Optional: hex color used for the gradient placeholder before image loads
   accentColor String   @default("#0f172a")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // User-upload pipeline:
+  // - uploadedById: null for seeded catalog rows; user id for user submissions
+  // - status: "published" (visible to RN app) | "pending" (awaiting admin approval) | "rejected"
+  uploadedById String?
+  uploadedBy   User?    @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  status       String   @default("published")
+
   @@index([category, active])
   @@index([featured, active])
   @@index([updatedAt])
+  @@index([uploadedById])
+  @@index([status, active])
+}
+
+// Raw binary storage for user-uploaded images. Stored as Postgres `bytea`.
+// Served publicly via GET /api/blobs/[id] with Cache-Control headers so
+// the catalog can lazy-load the bytes only when an image is actually
+// rendered. In production, replace this with Vercel Blob or S3 + CDN
+// (see DEPLOY.md) — the API contract (/api/blobs/[id]) stays the same.
+model Blob {
+  id        String   @id @default(cuid())
+  mime      String   @default("image/jpeg")
+  size      Int      @default(0)
+  data      Bytes
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 model Category {
@@ -118,15 +142,30 @@ model AiPrompt {
   @@index([status])
 }
 
-// Keep the demo User/Post models so the scaffold keeps working if you query them.
+// Kiki user accounts. Email + password (bcrypt hash) auth.
+// The FIRST registered user is auto-promoted to role="admin" so they can
+// approve/reject subsequent user uploads.
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String      @id @default(cuid())
+  email        String      @unique
+  name         String?
+  // bcrypt hash — null only for placeholder accounts (rare)
+  passwordHash String?
+  // "user" | "admin"
+  role         String      @default("user")
+  // Display name shown on uploads (defaults to email local-part)
+  displayName  String?
+  // Optional avatar URL (for future use; can be a data URL or external URL)
+  avatarUrl    String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  wallpapers   Wallpaper[]
+
+  @@index([email])
 }
 
+// Legacy scaffold model — kept so the scaffold's existing queries don't break.
+// Not used by Kiki.
 model Post {
   id        String   @id @default(cuid())
   title     String

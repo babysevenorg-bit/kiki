@@ -29,12 +29,24 @@ export async function POST(req: NextRequest) {
   let usedFallback = true
   try {
     const zai = await ZAI.create()
-    const result = await zai.images.generate({
+    // The SDK exposes images.generations.create(). Cast to any to dodge SDK
+    // type drift across versions — the runtime contract is stable.
+    const result = (await (zai.images as unknown as {
+      generations: { create: (body: unknown) => Promise<unknown> }
+      generate?: (body: unknown) => Promise<unknown>
+    }).generate?.({
       prompt: `HD phone wallpaper, vertical 9:16 portrait, ${prompt}, highly detailed, vibrant color grading, suitable as a phone lockscreen`,
       size: (body.size as "1024x1024" | "1024x1792" | "1792x1024") || "1024x1792",
-    })
-    // The SDK returns either base64 or a hosted URL depending on version.
-    const data = (result as unknown as { data?: { url?: string; b64?: string; base64?: string } }).data
+    }) ??
+      (await (zai.images as unknown as {
+        generations: { create: (body: unknown) => Promise<unknown> }
+      }).generations.create({
+        prompt: `HD phone wallpaper, vertical 9:16 portrait, ${prompt}, highly detailed, vibrant color grading, suitable as a phone lockscreen`,
+        size: (body.size as "1024x1024" | "1024x1792" | "1792x1024") || "1024x1792",
+      })) as {
+        data?: { url?: string; b64?: string; base64?: string }
+      })
+    const data = (result as { data?: { url?: string; b64?: string; base64?: string } }).data
     if (data?.url) {
       imageUrl = data.url
       usedFallback = false

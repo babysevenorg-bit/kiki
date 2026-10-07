@@ -94,6 +94,8 @@ export function toPublicWallpaper(row: {
   accentColor: string
   createdAt: Date
   updatedAt: Date
+  status?: string
+  uploadedById?: string | null
 }) {
   return {
     id: row.id,
@@ -111,5 +113,7 @@ export function toPublicWallpaper(row: {
     accentColor: row.accentColor,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    status: row.status ?? "published",
+    uploadedById: row.uploadedById ?? null,
   }
 }
