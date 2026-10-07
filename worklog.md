@@ -325,3 +325,32 @@ Stage Summary:
 - The Kiki RN app integration package is ready at /home/z/my-project/download/kiki-mobile-integration/ — 7 files + 1 guide.
 - User needs to: (1) copy the files into mobile/lib/, mobile/app/, mobile/env.example in VS Code; (2) install expo-image-picker; (3) set the real Vercel URL in mobile/.env; (4) follow the 8 steps in INTEGRATION.md.
 - All integration files are downloadable from /home/z/my-project/download/kiki-mobile-integration/.
+
+---
+Task ID: 10
+Agent: Super Z (main)
+Task: Diagnose the recurring 503 errors on Vercel. Now /api/auth/login is also failing, which means it's not just DB issues.
+
+Work Log:
+- Analyzed the error pattern: ALL API routes returning 503 (catalog + auth + login). The auth route only queries the DB after credential validation — if it's failing on login POST (which doesn't even touch DB until inside the try block), the issue is likely either: (a) DATABASE_URL missing/wrong on Vercel, (b) Prisma Client not generated during Vercel build, or (c) KIKI_JWT_SECRET missing in production (my auth lib throws if NODE_ENV === 'production' and the secret isn't set).
+- Added `postinstall: "prisma generate || echo skip"` to package.json — forces Prisma Client regeneration on every `bun install` on Vercel. Bun sometimes doesn't trigger @prisma/client's own postinstall hook reliably; this explicit script makes it deterministic.
+- Added `src/app/api/debug/route.ts` — a diagnostic endpoint that returns:
+  - Env var presence (DATABASE_URL, DATABASE_URL_UNPOOLED, KIKI_JWT_SECRET, VERCEL_ENV, VERCEL_URL) with masked URL previews (no credential leakage)
+  - Whether Prisma Client can be imported (catches "Prisma Client not generated" build issues)
+  - Whether a live count() query succeeds (catches DB connection issues)
+  - A 'diagnosis' array that tells the user EXACTLY what to fix:
+    - "❌ DATABASE_URL is not set on Vercel"
+    - "⚠️ missing &pgbouncer=true"
+    - "❌ KIKI_JWT_SECRET is not set in production"
+    - "❌ Prisma Client could not be imported"
+    - "❌ Prisma query failed: <error message>"
+    - "✅ Everything looks configured"
+- Verified locally: GET /api/debug returns 200 with prisma.status="ok", userCount=3 (the 2 test users I created during the auth flow test, plus the founder account). All env vars set, JWT secret length 64 chars (correct).
+- Lint passed clean (only 2 false-positive warnings about RN Image components needing alt=, which don't apply to React Native).
+- Committed as `d43f48b Kiki backend: add postinstall + /api/debug endpoint to diagnose Vercel 503s` (2 files changed, 111 insertions, 1 deletion).
+- Pushed to GitHub: `b0dcd2b..d43f48b main -> main`. Token immediately stripped. Verified `grep -c "ghp_\|github_pat_\|npg_\|neondb_owner" .git/config` = 0. Local HEAD `d43f48b` matches remote HEAD `d43f48b`.
+
+Stage Summary:
+- Vercel will auto-deploy commit `d43f48b` from the GitHub webhook.
+- Once deployed, the user should hit `https://YOUR-APP.vercel.app/api/debug` and paste the response — the diagnosis array will tell us exactly what's wrong (missing env var, missing pgbouncer flag, missing JWT secret, Prisma Client not generated, etc.).
+- Most likely root cause: the user hasn't set KIKI_JWT_SECRET on Vercel, OR DATABASE_URL is missing the &pgbouncer=true flag.
