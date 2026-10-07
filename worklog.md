@@ -141,3 +141,23 @@ Stage Summary:
 - No secrets in `.git/config` (verified with `grep -c 'ghp_\|npg_\|neondb_owner' .git/config` = 0).
 - Commit `dcee092` is local-only; user needs to push it to GitHub (or share a new PAT).
 - The dev server is running on port 3000 hitting Neon.
+
+---
+Task ID: 4
+Agent: Super Z (main)
+Task: Push the Neon integration commit to GitHub so the user can import it on Vercel.
+
+Work Log:
+- User provided a fresh GitHub PAT (with `repo` scope).
+- Added the PAT to the remote URL using the `x-access-token:<token>@` form (one-time auth): `git remote set-url origin "https://x-access-token:<token>@github.com/babysevenorg-bit/kiki.git"`.
+- Ran `git push origin main` — succeeded: `1c08b11..bfbe062 main -> main`. (The remote HEAD `bfbe062` is ahead of my Neon commit `dcee092` because the sandbox's auto-watcher captured a couple of intermediate file changes as their own commits, but `dcee092` is in the history.)
+- Immediately ran `git remote set-url origin "https://github.com/babysevenorg-bit/kiki.git"` to strip the token from `.git/config`.
+- Verified: `grep -c "ghp_\|npg_\|neondb_owner" .git/config` = 0 (no secrets stored anywhere in git config).
+- Verified push with `git ls-remote origin main` (public HTTPS, no auth): returned `bfbe062f22e1084d4841d2d1d6a1f01f5b0d7ab7 refs/heads/main`, matching local HEAD exactly.
+- Reminded user to revoke the PAT.
+
+Stage Summary:
+- `main` on GitHub is now at `bfbe062`, with the Neon-Postgres schema + all API hardening + idempotent seed + docs all pushed.
+- Vercel can now import (or auto-deploy on every push) the repo with the Neon-ready Prisma schema.
+- Token was used for the single push, then immediately stripped from `.git/config`. User should revoke the PAT.
+- Local dev server still running on port 3000, hitting Neon.
