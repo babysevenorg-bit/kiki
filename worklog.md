@@ -161,3 +161,26 @@ Stage Summary:
 - Vercel can now import (or auto-deploy on every push) the repo with the Neon-ready Prisma schema.
 - Token was used for the single push, then immediately stripped from `.git/config`. User should revoke the PAT.
 - Local dev server still running on port 3000, hitting Neon.
+
+---
+Task ID: 5
+Agent: Super Z (main)
+Task: Investigate and fix the 503 errors the user reported on /api/wallpapers, /api/categories, /api/featured.
+
+Work Log:
+- Checked dev server status — still running on PID 3846, started 10:03:35.
+- Curls to localhost:3000 for /api/health, /api/wallpapers, /api/categories, /api/featured ALL returned 200 with valid Neon-backed data (18 wallpapers, 8 categories, 5 featured). No 503s reproduced from my side.
+- Checked /home/z/my-project/dev.log — NO 503 entries exist in the entire log. Every API request returned 200. The 503s the user reported must have come from either (a) a stale browser tab from before the dev server restarted cleanly, or (b) a Vercel deployment that doesn't have DATABASE_URL env vars set yet.
+- Either way, hardened the backend against transient Neon cold-start failures (Neon free tier scales compute to zero after 5 min of inactivity, so the FIRST request after idle can fail with a connection timeout):
+  - Added `withDbRetry<T>(fn)` helper in src/lib/kiki.ts — catches connection-class errors (Timed out, Connection terminated, ECONNRESET, etc.), waits 600ms, retries once.
+  - Wrapped EVERY Prisma query in EVERY API route with withDbRetry: /api/wallpapers (GET), /api/wallpapers/[id] (GET + DELETE), /api/categories (GET), /api/featured (GET), /api/downloads (POST — 3 queries), /api/rotation/[deviceId] (GET + PUT), /api/health (GET), /api/admin/wallpapers (POST + PATCH), /api/admin/categories (POST).
+  - Hardened the dashboard's apiFetch() to retry 503 and network failures up to 3 times with exponential backoff (800ms, 1600ms). Server-side retry is the first line of defense; client-side retry is the second.
+- Re-ran smoke tests — all endpoints return 200. Lint passed clean.
+- Committed locally as `522b4b4 Kiki backend: add retry-on-cold-start (Neon free tier resilience)` (11 files, 201 insertions, 123 deletions).
+- NOT pushed — waiting for user to confirm where the 503s are happening (Vercel or local) so I know whether to advise setting Vercel env vars, refreshing the browser, or pushing this fix.
+
+Stage Summary:
+- The dev server on localhost:3000 is hitting Neon cleanly (every endpoint returns 200).
+- If the user is seeing 503s on a deployed Vercel app, the cause is almost certainly that Vercel doesn't have DATABASE_URL / DATABASE_URL_UNPOOLED env vars set yet — they need to add them and redeploy.
+- If they're seeing 503s on the preview URL (https://preview-<bot-id>.space-z.ai/), those were probably from a stale tab before the dev server picked up the new .env — a hard refresh should fix it.
+- The retry hardening (commit 522b4b4) is local-only; needs a push to GitHub so Vercel can pick it up. Token was already stripped from .git/config after the previous push, so a fresh PAT is needed to push.
