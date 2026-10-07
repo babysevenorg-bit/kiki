@@ -88,3 +88,56 @@ Stage Summary:
 - No secrets, no `.env`, no SQLite binary, no local download artifacts are on GitHub.
 - Token was used for the single push, then immediately removed from local git config — the user can safely revoke it.
 - The user can now import the repo on Vercel, add their env vars, and deploy.
+
+---
+Task ID: 3
+Agent: Super Z (main)
+Task: Integrate the user-supplied Neon Postgres database into the Kiki backend. Inspect existing tables first, push schema safely, seed without overwrites, harden API routes against DB failures, do not deploy.
+
+Work Log:
+- Saved Neon pooled + direct connection URLs to `.env` (gitignored — verified with `git check-ignore .env`). Added `&pgbouncer=true&connect_timeout=15` to the pooled URL so Prisma uses PgBouncer-compatible mode on Neon's pooler endpoint.
+- Wrote `scripts/inspect-neon.ts` using the `pg` driver directly (not Prisma) to bypass Prisma's chicken-and-egg schema validation. Ran it against the user's Neon DB — result: empty database, no existing tables.
+- Updated `prisma/schema.prisma`: provider `sqlite` → `postgresql`, added `directUrl = env("DATABASE_URL_UNPOOLED")` so `prisma migrate`/`db:push` use the direct connection while runtime Prisma Client uses the pooled one. Updated the top schema comment to reflect the new state.
+- Ran `bun run db:push` — created all 7 tables on Neon in ~12s (Wallpaper, Category, DownloadEvent, RotationConfig, AiPrompt, plus legacy User/Post). Prisma Client regenerated for Postgres.
+- Re-ran `scripts/inspect-neon.ts` — confirmed 7 tables exist, all 0 rows.
+- Refactored `scripts/seed.ts` to be INSERT-ONLY:
+  - Categories: `findUnique(slug)` first; skip if exists (no icon/accent overwrites)
+  - Wallpapers: `findFirst(title)` first; skip if exists (no field overwrites)
+  - Added a `created=X skipped=Y (already existed)` summary line so re-runs are obvious
+- Ran `bun run scripts/seed.ts` against Neon — 8 categories + 18 wallpapers inserted. Confirmed via inspect-neon.ts: Category=8 rows, Wallpaper=18 rows.
+- Patched ALL public/admin API routes to wrap Prisma queries in try/catch and return clean `503 { ok: false, code: 'db_unreachable', error: 'Could not reach...' }` responses on connection failures:
+  - `src/app/api/wallpapers/route.ts` (GET)
+  - `src/app/api/wallpapers/[id]/route.ts` (GET, DELETE)
+  - `src/app/api/categories/route.ts` (GET)
+  - `src/app/api/featured/route.ts` (GET)
+  - `src/app/api/downloads/route.ts` (POST)
+  - `src/app/api/rotation/[deviceId]/route.ts` (GET, PUT)
+  - `src/app/api/admin/wallpapers/route.ts` (POST, PATCH)
+  - `src/app/api/admin/categories/route.ts` (POST)
+  - `src/app/api/health/route.ts` (GET) — added `db.provider` and masked `db.host` so the dashboard confirms it's hitting Neon
+- Postgres compatibility fix in `/api/wallpapers`: added `mode: 'insensitive'` to all `contains()` filters (SQLite was case-insensitive by default; Postgres is case-sensitive by default). Search "tokyo" now correctly matches "Tokyo at Night".
+- Hit a Bun env-loading gotcha: my Bash shell (inherited from the sandbox's `dev.sh` parent) had `DATABASE_URL=file:...` pre-set, and Bun's `.env` loader does NOT override existing process.env vars. Fixed by killing the old dev server and restarting with `env -u DATABASE_URL bash .zscripts/dev.sh` so the .env Neon URL wins.
+- End-to-end smoke tests against Neon ALL passed:
+  - GET /api/health → `db.status: "ok"`, `db.provider: "postgresql"`, `db.host: "ep-wispy-boat-b8z2213z-pooler.c-14.us-east-1.aws.neon.tech"`, `wallpapers: 18`, `categories: 8`
+  - GET /api/wallpapers?limit=3 → 3 items, total=18, pages=6
+  - GET /api/wallpapers?query=tokyo → 1 item ("Tokyo at Night") — case-insensitive search works
+  - GET /api/categories → 8 categories with correct counts (Nature=3, Abstract=3, etc.)
+  - GET /api/featured → 5 featured wallpapers
+  - POST /api/downloads → recorded event, bumped count to 1
+  - GET /api/rotation/kiki-test-device-001 → auto-created default config
+  - PUT /api/rotation/kiki-test-device-001 → updated with 8 wallpaper ids, intervalSec=5, shuffle=true
+  - GET /api/events (SSE) → received `event: hello` on connect
+  - POST /api/admin/wallpapers → created a test wallpaper; DELETE removed it cleanly
+- Updated `.env.example` with placeholder Neon URLs (no secrets), updated `README.md` and `DEPLOY.md` to reflect that the schema is now postgresql (no manual switch needed) and to document the shell env inheritance caveat.
+- Lint passed clean (0 errors, 0 warnings).
+- Screenshot saved to `/home/z/my-project/download/kiki-neon-dashboard.png` — dashboard rendering 18 Neon-backed wallpapers.
+- Committed locally as `dcee092 Kiki backend: switch to Neon Postgres, harden API routes, idempotent seed` (16 files changed, 578 insertions, 342 deletions). NOT pushed to GitHub (the previous PAT should be revoked; user can push from their local clone or share a new PAT).
+
+Stage Summary:
+- Kiki backend now reads/writes from Neon Postgres end-to-end. Catalog, downloads, rotation, admin CRUD, SSE, and the dashboard all work against the user's Neon DB.
+- 7 tables created on Neon with 18 wallpapers + 8 categories seeded (INSERT-ONLY, safe to re-run).
+- All API routes return clean 503 errors on DB failure instead of unhandled 500s.
+- Case-insensitive search works correctly on Postgres.
+- No secrets in `.git/config` (verified with `grep -c 'ghp_\|npg_\|neondb_owner' .git/config` = 0).
+- Commit `dcee092` is local-only; user needs to push it to GitHub (or share a new PAT).
+- The dev server is running on port 3000 hitting Neon.
