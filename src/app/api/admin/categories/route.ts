@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { broadcast } from "@/lib/broadcaster"
-import { err, ok } from "@/lib/kiki"
+import { err, ok, withDbRetry } from "@/lib/kiki"
 
 export const dynamic = "force-dynamic"
 

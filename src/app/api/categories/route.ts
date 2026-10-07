@@ -1,16 +1,18 @@
 // Kiki — list active categories for the RN chip rail.
 import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { cacheHeaders, err, ok } from "@/lib/kiki"
+import { cacheHeaders, err, ok, withDbRetry } from "@/lib/kiki"
 
 export const dynamic = "force-dynamic"
 
 export async function GET() {
   try {
-    const categories = await db.category.findMany({
-      where: { active: true },
-      orderBy: [{ name: "asc" }],
-    })
+    const categories = await withDbRetry(() =>
+      db.category.findMany({
+        where: { active: true },
+        orderBy: [{ name: "asc" }],
+      }),
+    )
     return NextResponse.json(
       ok({
         items: categories.map((c) => ({

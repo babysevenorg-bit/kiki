@@ -8,6 +8,7 @@ import {
   err,
   ok,
   toPublicWallpaper,
+  withDbRetry,
 } from "@/lib/kiki"
 
 export const dynamic = "force-dynamic"
@@ -55,15 +56,17 @@ export async function GET(req: Request) {
       : { updatedAt: "desc" as const }
 
   try {
-    const [rows, total] = await Promise.all([
-      db.wallpaper.findMany({
-        where,
-        orderBy,
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      db.wallpaper.count({ where }),
-    ])
+    const [rows, total] = await withDbRetry(() =>
+      Promise.all([
+        db.wallpaper.findMany({
+          where,
+          orderBy,
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        db.wallpaper.count({ where }),
+      ]),
+    )
 
     return NextResponse.json(
       ok({

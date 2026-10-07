@@ -3,7 +3,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { broadcast } from "@/lib/broadcaster"
-import { err, ok, parseTags } from "@/lib/kiki"
+import { err, ok, parseTags, withDbRetry } from "@/lib/kiki"
 
 export const dynamic = "force-dynamic"
 
@@ -37,38 +37,42 @@ export async function POST(req: NextRequest) {
   const category = (body.category ?? "uncategorized").toString()
 
   try {
-    const wallpaper = await db.wallpaper.create({
-      data: {
-        title: body.title,
-        imageUrl: body.imageUrl,
-        thumbUrl: body.thumbUrl,
-        category,
-        tags: JSON.stringify(parseTags(body.tags)),
-        resolution: body.resolution ?? "1080x1920",
-        fileSizeKb: Number(body.fileSizeKb ?? 0),
-        orientation: body.orientation ?? "portrait",
-        featured: Boolean(body.featured ?? false),
-        active: Boolean(body.active ?? true),
-        source: body.source ?? "kiki-studio",
-        accentColor: body.accentColor ?? "#0f172a",
-      },
-    })
+    const wallpaper = await withDbRetry(() =>
+      db.wallpaper.create({
+        data: {
+          title: body.title,
+          imageUrl: body.imageUrl,
+          thumbUrl: body.thumbUrl,
+          category,
+          tags: JSON.stringify(parseTags(body.tags)),
+          resolution: body.resolution ?? "1080x1920",
+          fileSizeKb: Number(body.fileSizeKb ?? 0),
+          orientation: body.orientation ?? "portrait",
+          featured: Boolean(body.featured ?? false),
+          active: Boolean(body.active ?? true),
+          source: body.source ?? "kiki-studio",
+          accentColor: body.accentColor ?? "#0f172a",
+        },
+      }),
+    )
 
     // Lazy upsert category row
     const slug = category.toLowerCase().replace(/\s+/g, "-")
-    await db.category
-      .upsert({
-        where: { slug },
-        create: {
-          name: category,
-          slug,
-          count: await db.wallpaper.count({ where: { category, active: true } }),
-        },
-        update: {
-          count: await db.wallpaper.count({ where: { category, active: true } }),
-        },
-      })
-      .catch(() => undefined)
+    await withDbRetry(() =>
+      db.category
+        .upsert({
+          where: { slug },
+          create: {
+            name: category,
+            slug,
+            count: await db.wallpaper.count({ where: { category, active: true } }),
+          },
+          update: {
+            count: await db.wallpaper.count({ where: { category, active: true } }),
+          },
+        })
+        .catch(() => undefined),
+    )
 
     broadcast({ type: "wallpaper.created", id: wallpaper.id, ts: Date.now() })
     return NextResponse.json(ok({ id: wallpaper.id, created: true }))
@@ -109,7 +113,9 @@ export async function PATCH(req: NextRequest) {
   }
 
   try {
-    const existing = await db.wallpaper.findUnique({ where: { id: body.id } })
+    const existing = await withDbRetry(() =>
+      db.wallpaper.findUnique({ where: { id: body.id } }),
+    )
     if (!existing) {
       return NextResponse.json(err("not_found", "Wallpaper not found"), {
         status: 404,
@@ -130,27 +136,31 @@ export async function PATCH(req: NextRequest) {
     if (typeof body.source === "string") data.source = body.source
     if (typeof body.accentColor === "string") data.accentColor = body.accentColor
 
-    const updated = await db.wallpaper.update({ where: { id: body.id }, data })
+    const updated = await withDbRetry(() =>
+      db.wallpaper.update({ where: { id: body.id }, data }),
+    )
 
     if (typeof body.category === "string") {
       const slug = body.category.toLowerCase().replace(/\s+/g, "-")
-      await db.category
-        .upsert({
-          where: { slug },
-          create: {
-            name: body.category,
-            slug,
-            count: await db.wallpaper.count({
-              where: { category: body.category, active: true },
-            }),
-          },
-          update: {
-            count: await db.wallpaper.count({
-              where: { category: body.category, active: true },
-            }),
-          },
-        })
-        .catch(() => undefined)
+      await withDbRetry(() =>
+        db.category
+          .upsert({
+            where: { slug },
+            create: {
+              name: body.category,
+              slug,
+              count: await db.wallpaper.count({
+                where: { category: body.category, active: true },
+              }),
+            },
+            update: {
+              count: await db.wallpaper.count({
+                where: { category: body.category, active: true },
+              }),
+            },
+          })
+          .catch(() => undefined),
+      )
     }
 
     broadcast({ type: "wallpaper.updated", id: updated.id, ts: Date.now() })

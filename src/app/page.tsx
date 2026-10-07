@@ -80,16 +80,38 @@ type ApiListResponse<T> = { ok: true; data: T } | { ok: false; error: string }
 
 // ---------- Helpers ----------
 async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-  })
-  const json = (await res.json().catch(() => ({}))) as ApiListResponse<T>
-  if (!res.ok || !("ok" in json) || !json.ok) {
-    const msg = "ok" in json && !json.ok ? json.error : `HTTP ${res.status}`
-    throw new Error(msg)
+  // Retry on 503 (transient Neon cold-start / connection failures).
+  // The API route already retries server-side once; this is the second
+  // line of defense for when even the server-side retry wasn't enough.
+  let lastErr: unknown = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(url, {
+        ...init,
+        headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+      })
+      // Retry on 503 — server says "DB unreachable, try again"
+      if (res.status === 503 && attempt < 2) {
+        // Exponential backoff: 800ms, 1600ms
+        await new Promise((r) => setTimeout(r, 800 * (attempt + 1)))
+        continue
+      }
+      const json = (await res.json().catch(() => ({}))) as ApiListResponse<T>
+      if (!res.ok || !("ok" in json) || !json.ok) {
+        const msg = "ok" in json && !json.ok ? json.error : `HTTP ${res.status}`
+        throw new Error(msg)
+      }
+      return json.data
+    } catch (e) {
+      lastErr = e
+      // Network failure — retry with backoff too
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 800 * (attempt + 1)))
+        continue
+      }
+    }
   }
-  return json.data
+  throw lastErr instanceof Error ? lastErr : new Error("Network error")
 }
 
 function formatBytes(kb: number) {

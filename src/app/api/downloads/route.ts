@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { broadcast } from "@/lib/broadcaster"
-import { err, isValidDeviceId, ok } from "@/lib/kiki"
+import { err, isValidDeviceId, ok, withDbRetry } from "@/lib/kiki"
 
 export const dynamic = "force-dynamic"
 
@@ -24,23 +24,29 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const wallpaper = await db.wallpaper.findUnique({ where: { id: wallpaperId } })
+    const wallpaper = await withDbRetry(() =>
+      db.wallpaper.findUnique({ where: { id: wallpaperId } }),
+    )
     if (!wallpaper || !wallpaper.active) {
       return NextResponse.json(err("not_found", "Wallpaper not found"), {
         status: 404,
       })
     }
 
-    const event = await db.downloadEvent.create({
-      data: {
-        wallpaperId,
-        deviceId: deviceId as string,
-      },
-    })
-    const updated = await db.wallpaper.update({
-      where: { id: wallpaperId },
-      data: { downloads: { increment: 1 } },
-    })
+    const event = await withDbRetry(() =>
+      db.downloadEvent.create({
+        data: {
+          wallpaperId,
+          deviceId: deviceId as string,
+        },
+      }),
+    )
+    const updated = await withDbRetry(() =>
+      db.wallpaper.update({
+        where: { id: wallpaperId },
+        data: { downloads: { increment: 1 } },
+      }),
+    )
 
     broadcast({
       type: "download.counted",

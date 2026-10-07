@@ -4,7 +4,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { broadcast } from "@/lib/broadcaster"
-import { err, isValidDeviceId, ok } from "@/lib/kiki"
+import { err, isValidDeviceId, ok, withDbRetry } from "@/lib/kiki"
 
 export const dynamic = "force-dynamic"
 
@@ -19,12 +19,16 @@ export async function GET(
     })
   }
   try {
-    let config = await db.rotationConfig.findUnique({ where: { deviceId } })
+    let config = await withDbRetry(() =>
+      db.rotationConfig.findUnique({ where: { deviceId } }),
+    )
     if (!config) {
       // Create an empty default so the RN app can show "no wallpapers selected yet"
-      config = await db.rotationConfig.create({
-        data: { deviceId, wallpaperIds: "[]", intervalSec: 60 },
-      })
+      config = await withDbRetry(() =>
+        db.rotationConfig.create({
+          data: { deviceId, wallpaperIds: "[]", intervalSec: 60 },
+        }),
+      )
     }
     return NextResponse.json(
       ok({
@@ -101,26 +105,28 @@ export async function PUT(
       : undefined
 
   try {
-    const config = await db.rotationConfig.upsert({
-      where: { deviceId },
-      update: {
-        wallpaperIds: JSON.stringify(wallpaperIds),
-        intervalSec,
-        activeFrom,
-        activeTo,
-        shuffle,
-        ...(lastSwapAt ? { lastSwapAt } : {}),
-      },
-      create: {
-        deviceId,
-        wallpaperIds: JSON.stringify(wallpaperIds),
-        intervalSec,
-        activeFrom,
-        activeTo,
-        shuffle,
-        ...(lastSwapAt ? { lastSwapAt } : {}),
-      },
-    })
+    const config = await withDbRetry(() =>
+      db.rotationConfig.upsert({
+        where: { deviceId },
+        update: {
+          wallpaperIds: JSON.stringify(wallpaperIds),
+          intervalSec,
+          activeFrom,
+          activeTo,
+          shuffle,
+          ...(lastSwapAt ? { lastSwapAt } : {}),
+        },
+        create: {
+          deviceId,
+          wallpaperIds: JSON.stringify(wallpaperIds),
+          intervalSec,
+          activeFrom,
+          activeTo,
+          shuffle,
+          ...(lastSwapAt ? { lastSwapAt } : {}),
+        },
+      }),
+    )
 
     broadcast({ type: "rotation.changed", deviceId, ts: Date.now() })
 

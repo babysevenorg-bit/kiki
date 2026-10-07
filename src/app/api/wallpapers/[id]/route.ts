@@ -1,7 +1,7 @@
 // Kiki — single wallpaper detail.
 import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { cacheHeaders, err, ok, toPublicWallpaper } from "@/lib/kiki"
+import { cacheHeaders, err, ok, toPublicWallpaper, withDbRetry } from "@/lib/kiki"
 import { broadcast } from "@/lib/broadcaster"
 
 export const dynamic = "force-dynamic"
@@ -12,7 +12,9 @@ export async function GET(
 ) {
   const { id } = await params
   try {
-    const wallpaper = await db.wallpaper.findUnique({ where: { id } })
+    const wallpaper = await withDbRetry(() =>
+      db.wallpaper.findUnique({ where: { id } }),
+    )
     if (!wallpaper || !wallpaper.active) {
       return NextResponse.json(err("not_found", "Wallpaper not found"), {
         status: 404,
@@ -37,7 +39,7 @@ export async function DELETE(
 ) {
   const { id } = await params
   try {
-    const deleted = await db.wallpaper.delete({ where: { id } })
+    const deleted = await withDbRetry(() => db.wallpaper.delete({ where: { id } }))
     await db.category
       .update({
         where: { slug: deleted.category.toLowerCase().replace(/\s+/g, "-") },

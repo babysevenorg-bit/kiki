@@ -15,6 +15,31 @@ export function err(error: string, code?: string): ApiErr {
   return { ok: false, error, code }
 }
 
+/**
+ * Wrap a Prisma promise so transient DB connection failures are retried
+ * once. Neon's free tier scales compute to zero after 5 min of inactivity,
+ * so the FIRST request after idle can fail with a connection timeout —
+ * a short retry with backoff turns that into a successful request.
+ *
+ * This only retries on connection-class errors. Data errors (unique
+ * constraint, not found, etc.) are returned to the caller untouched.
+ */
+export async function withDbRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (e) {
+    const msg = (e as Error)?.message ?? String(e)
+    // Match Prisma's connection-error signatures from pg + Neon
+    const isTransient = /Timed out|Connection terminated|Can't reach database server|Connection refused|read ETIMEDOUT|ECONNRESET|socket hang up/i.test(
+      msg,
+    )
+    if (!isTransient) throw e
+    // Wait 600ms then retry once. Neon cold-start usually takes <300ms.
+    await new Promise((r) => setTimeout(r, 600))
+    return await fn()
+  }
+}
+
 export function parseTags(raw: unknown): string[] {
   if (Array.isArray(raw)) {
     return raw

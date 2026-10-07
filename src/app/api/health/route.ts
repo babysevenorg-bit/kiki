@@ -1,6 +1,7 @@
 // Kiki backend — health check + fingerprint endpoint.
 import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { withDbRetry } from "@/lib/kiki"
 
 export const dynamic = "force-dynamic"
 
@@ -9,10 +10,9 @@ export async function GET() {
   let wallpaperCount = 0
   let categoryCount = 0
   try {
-    const [w, c] = await Promise.all([
-      db.wallpaper.count(),
-      db.category.count(),
-    ])
+    const [w, c] = await withDbRetry(() =>
+      Promise.all([db.wallpaper.count(), db.category.count()]),
+    )
     wallpaperCount = w
     categoryCount = c
     dbStatus = "ok"
