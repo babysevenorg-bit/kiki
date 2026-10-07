@@ -43,25 +43,47 @@ Kiki is a phone wallpapers + lockscreen app built in React Native. This repo is 
 
 ## Local dev
 
-```bash
-bun install
-bun run db:push              # creates SQLite tables
-bun run scripts/seed.ts      # seeds 18 HD wallpapers + 8 categories
-bun run dev                  # http://localhost:3000
-```
+The schema is configured for **Neon Postgres**. You need a Neon project (free tier is fine).
+
+1. Create a Neon project at [neon.tech](https://neon.tech), copy both connection strings (pooled + direct).
+2. Copy `.env.example` to `.env` and fill in the real values:
+   - `DATABASE_URL` — Neon pooled URL with `&pgbouncer=true&connect_timeout=15`
+   - `DATABASE_URL_UNPOOLED` — Neon direct URL (for migrations)
+3. Inspect the Neon DB first (don't blindly push tables over existing data):
+   ```bash
+   bun run scripts/inspect-neon.ts
+   ```
+4. Push the schema (creates the 7 Kiki tables — `Wallpaper`, `Category`, `DownloadEvent`, `RotationConfig`, `AiPrompt`, plus legacy `User`/`Post`):
+   ```bash
+   bun run db:push
+   ```
+5. Seed the catalog — INSERT-ONLY, never overwrites existing rows:
+   ```bash
+   bun run scripts/seed.ts
+   ```
+6. Start the dev server:
+   ```bash
+   bun run dev
+   ```
+7. Verify against Neon:
+   ```bash
+   curl http://localhost:3000/api/health
+   # → db.status: "ok", db.provider: "postgresql", db.host: "your-pooler.neon.tech"
+   ```
+
+> **Note on shell env inheritance**: If you have an old `DATABASE_URL` set in your shell session, Bun's `.env` loader will NOT override it. Run `unset DATABASE_URL` first, or use `env -u DATABASE_URL bun run dev`.
 
 ## Production deploy (Vercel + Neon)
 
 See [DEPLOY.md](./DEPLOY.md) for the full guide. Short version:
 
-1. Create a Neon Postgres project, copy the pooled + direct connection strings.
-2. In `prisma/schema.prisma`, change `provider = "sqlite"` to `"postgresql"`.
-3. Push to GitHub, import on Vercel.
-4. Set env vars on Vercel:
-   - `DATABASE_URL` — Neon pooled connection string
-   - `DATABASE_URL_UNPOOLED` — Neon direct connection string (for Prisma migrations)
-5. Run `bun run db:push` once locally against your Neon DB to create tables.
-6. Deploy. Verify `/api/health` returns `db.status: "ok"`.
+1. Push the repo to GitHub.
+2. Import it on [vercel.com](https://vercel.com).
+3. Set env vars on Vercel:
+   - `DATABASE_URL` — Neon pooled connection string with `&pgbouncer=true&connect_timeout=15`
+   - `DATABASE_URL_UNPOOLED` — Neon direct connection string (for `prisma migrate`)
+4. Set the build command to skip migrations (you've already pushed them locally): `next build`
+5. Deploy. Verify `/api/health` returns `db.status: "ok"`.
 
 ## Roadmap
 

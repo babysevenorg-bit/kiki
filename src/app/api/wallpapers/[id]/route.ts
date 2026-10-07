@@ -11,16 +11,24 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const wallpaper = await db.wallpaper.findUnique({ where: { id } })
-  if (!wallpaper || !wallpaper.active) {
-    return NextResponse.json(err("not_found", "Wallpaper not found"), {
-      status: 404,
-    })
+  try {
+    const wallpaper = await db.wallpaper.findUnique({ where: { id } })
+    if (!wallpaper || !wallpaper.active) {
+      return NextResponse.json(err("not_found", "Wallpaper not found"), {
+        status: 404,
+      })
+    }
+    return NextResponse.json(
+      ok(toPublicWallpaper(wallpaper)),
+      { headers: cacheHeaders(120) },
+    )
+  } catch (e) {
+    console.error("[kiki:wallpaper:get] error:", (e as Error)?.message)
+    return NextResponse.json(
+      err("db_unreachable", "Could not reach the catalog database."),
+      { status: 503 },
+    )
   }
-  return NextResponse.json(
-    ok(toPublicWallpaper(wallpaper)),
-    { headers: cacheHeaders(120) },
-  )
 }
 
 export async function DELETE(
@@ -32,7 +40,7 @@ export async function DELETE(
     const deleted = await db.wallpaper.delete({ where: { id } })
     await db.category
       .update({
-        where: { slug: deleted.category },
+        where: { slug: deleted.category.toLowerCase().replace(/\s+/g, "-") },
         data: {
           count: await db.wallpaper.count({
             where: { category: deleted.category, active: true },
@@ -42,9 +50,17 @@ export async function DELETE(
       .catch(() => undefined)
     broadcast({ type: "wallpaper.deleted", id, ts: Date.now() })
     return NextResponse.json(ok({ id: deleted.id, deleted: true }))
-  } catch {
-    return NextResponse.json(err("not_found", "Wallpaper not found"), {
-      status: 404,
-    })
+  } catch (e) {
+    // Prisma throws P2025 when the record doesn't exist
+    if (String((e as Error).message).includes("does not exist")) {
+      return NextResponse.json(err("not_found", "Wallpaper not found"), {
+        status: 404,
+      })
+    }
+    console.error("[kiki:wallpaper:delete] error:", (e as Error)?.message)
+    return NextResponse.json(
+      err("db_unreachable", "Could not delete wallpaper. Please retry."),
+      { status: 503 },
+    )
   }
 }

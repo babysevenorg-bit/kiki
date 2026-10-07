@@ -217,74 +217,70 @@ function makeThumbUrl(unsplash: string) {
 async function main() {
   console.log("[kiki:seed] starting")
 
-  // Categories first
+  // Categories — INSERT-ONLY. If a category with the same slug already exists
+  // (e.g. the user customized the icon/accent on Neon), we leave it untouched.
+  let categoriesCreated = 0
+  let categoriesSkipped = 0
   for (const c of categories) {
-    await db.category.upsert({
-      where: { slug: c.slug },
-      create: { ...c, count: 0, active: true },
-      update: { icon: c.icon, accent: c.accent },
+    const existing = await db.category.findUnique({ where: { slug: c.slug } })
+    if (existing) {
+      categoriesSkipped++
+      continue
+    }
+    await db.category.create({
+      data: { ...c, count: 0, active: true },
     })
+    categoriesCreated++
   }
-  console.log(`[kiki:seed] ensured ${categories.length} categories`)
+  console.log(
+    `[kiki:seed] categories: created=${categoriesCreated} skipped=${categoriesSkipped}`,
+  )
 
-  // Wallpapers
+  // Wallpapers — INSERT-ONLY. Existing rows are never overwritten so that
+  // manual edits on Neon (or a previous seed run with custom titles) survive
+  // a re-run of this script.
   let created = 0
-  let updated = 0
+  let skipped = 0
   for (let i = 0; i < wallpapers.length; i++) {
     const w = wallpapers[i]
-    const imageUrl = makeImageUrl(w.unsplash)
-    const thumbUrl = makeThumbUrl(w.unsplash)
     // Use title as the natural key (deterministic re-run)
     const existing = await db.wallpaper.findFirst({ where: { title: w.title } })
     if (existing) {
-      await db.wallpaper.update({
-        where: { id: existing.id },
-        data: {
-          imageUrl,
-          thumbUrl,
-          category: w.category,
-          tags: JSON.stringify(w.tags),
-          resolution: w.resolution,
-          fileSizeKb: w.fileSizeKb,
-          orientation: "portrait",
-          accentColor: w.accentColor,
-          featured: i % 4 === 0, // every 4th is featured
-          active: true,
-          source: "unsplash",
-        },
-      })
-      updated++
-    } else {
-      await db.wallpaper.create({
-        data: {
-          title: w.title,
-          imageUrl,
-          thumbUrl,
-          category: w.category,
-          tags: JSON.stringify(w.tags),
-          resolution: w.resolution,
-          fileSizeKb: w.fileSizeKb,
-          orientation: "portrait",
-          accentColor: w.accentColor,
-          featured: i % 4 === 0,
-          active: true,
-          source: "unsplash",
-        },
-      })
-      created++
+      skipped++
+      continue
     }
+    const imageUrl = makeImageUrl(w.unsplash)
+    const thumbUrl = makeThumbUrl(w.unsplash)
+    await db.wallpaper.create({
+      data: {
+        title: w.title,
+        imageUrl,
+        thumbUrl,
+        category: w.category,
+        tags: JSON.stringify(w.tags),
+        resolution: w.resolution,
+        fileSizeKb: w.fileSizeKb,
+        orientation: "portrait",
+        accentColor: w.accentColor,
+        featured: i % 4 === 0, // every 4th is featured
+        active: true,
+        source: "unsplash",
+      },
+    })
+    created++
   }
 
-  // Recompute category counts
+  // Recompute category counts (safe — just reflects current state)
   for (const c of categories) {
+    const count = await db.wallpaper.count({ where: { category: c.name, active: true } })
     await db.category.update({
       where: { slug: c.slug },
-      data: { count: await db.wallpaper.count({ where: { category: c.name, active: true } }) },
+      data: { count },
     })
   }
 
   console.log(
-    `[kiki:seed] done. created=${created} updated=${updated} total=${wallpapers.length}`,
+    `[kiki:seed] done. created=${created} skipped=${skipped} (already existed) total=${wallpapers.length}`,
   )
 }
 

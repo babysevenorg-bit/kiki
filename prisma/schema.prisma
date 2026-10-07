@@ -1,14 +1,17 @@
-// Kiki backend schema — designed to be portable between SQLite (dev) and Neon Postgres (prod on Vercel).
-// When deploying to Vercel + Neon, switch provider to "postgresql" and set DATABASE_URL to your Neon connection string.
+// Kiki backend schema — Neon Postgres.
+// Pooled `DATABASE_URL` is used by Prisma Client at runtime (serverless-safe);
+// `DATABASE_URL_UNPOOLED` is used by `prisma migrate`/`db:push` only.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  // For Vercel/Neon, change this to "postgresql" and set DATABASE_URL=postgres://...
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  // Neon Postgres. Uses pooled DATABASE_URL at runtime (PgBouncer),
+  // and the direct (unpooled) DATABASE_URL_UNPOOLED for migrations.
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 model Wallpaper {
@@ -20,7 +23,9 @@ model Wallpaper {
   thumbUrl    String
   // Free-form category label, e.g. "Abstract", "Nature", "Anime", "Minimal"
   category    String
-  // Tags stored as a JSON string array, e.g. '["dark","mountains","4k"]'
+  // Tags stored as a JSON string array, e.g. '["dark","mountains","4k"]'.
+  // (Stored as TEXT rather than Postgres `String[]` to keep the schema
+  // portable — the API parses it via parseTags() in src/lib/kiki.ts.)
   tags        String   @default("[]")
   // Resolution string for display, e.g. "3840x2160"
   resolution  String   @default("1080x1920")

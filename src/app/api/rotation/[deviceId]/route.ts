@@ -18,25 +18,33 @@ export async function GET(
       status: 400,
     })
   }
-  let config = await db.rotationConfig.findUnique({ where: { deviceId } })
-  if (!config) {
-    // Create an empty default so the RN app can show "no wallpapers selected yet"
-    config = await db.rotationConfig.create({
-      data: { deviceId, wallpaperIds: "[]", intervalSec: 60 },
-    })
+  try {
+    let config = await db.rotationConfig.findUnique({ where: { deviceId } })
+    if (!config) {
+      // Create an empty default so the RN app can show "no wallpapers selected yet"
+      config = await db.rotationConfig.create({
+        data: { deviceId, wallpaperIds: "[]", intervalSec: 60 },
+      })
+    }
+    return NextResponse.json(
+      ok({
+        deviceId: config.deviceId,
+        wallpaperIds: JSON.parse(config.wallpaperIds) as string[],
+        intervalSec: config.intervalSec,
+        activeFrom: config.activeFrom,
+        activeTo: config.activeTo,
+        shuffle: config.shuffle,
+        lastSwapAt: config.lastSwapAt?.toISOString() ?? null,
+        updatedAt: config.updatedAt.toISOString(),
+      }),
+    )
+  } catch (e) {
+    console.error("[kiki:rotation:get] error:", (e as Error)?.message)
+    return NextResponse.json(
+      err("db_unreachable", "Could not reach the rotation database."),
+      { status: 503 },
+    )
   }
-  return NextResponse.json(
-    ok({
-      deviceId: config.deviceId,
-      wallpaperIds: JSON.parse(config.wallpaperIds) as string[],
-      intervalSec: config.intervalSec,
-      activeFrom: config.activeFrom,
-      activeTo: config.activeTo,
-      shuffle: config.shuffle,
-      lastSwapAt: config.lastSwapAt?.toISOString() ?? null,
-      updatedAt: config.updatedAt.toISOString(),
-    }),
-  )
 }
 
 export async function PUT(
@@ -92,39 +100,47 @@ export async function PUT(
       ? new Date(body.lastSwapAt)
       : undefined
 
-  const config = await db.rotationConfig.upsert({
-    where: { deviceId },
-    update: {
-      wallpaperIds: JSON.stringify(wallpaperIds),
-      intervalSec,
-      activeFrom,
-      activeTo,
-      shuffle,
-      ...(lastSwapAt ? { lastSwapAt } : {}),
-    },
-    create: {
-      deviceId,
-      wallpaperIds: JSON.stringify(wallpaperIds),
-      intervalSec,
-      activeFrom,
-      activeTo,
-      shuffle,
-      ...(lastSwapAt ? { lastSwapAt } : {}),
-    },
-  })
+  try {
+    const config = await db.rotationConfig.upsert({
+      where: { deviceId },
+      update: {
+        wallpaperIds: JSON.stringify(wallpaperIds),
+        intervalSec,
+        activeFrom,
+        activeTo,
+        shuffle,
+        ...(lastSwapAt ? { lastSwapAt } : {}),
+      },
+      create: {
+        deviceId,
+        wallpaperIds: JSON.stringify(wallpaperIds),
+        intervalSec,
+        activeFrom,
+        activeTo,
+        shuffle,
+        ...(lastSwapAt ? { lastSwapAt } : {}),
+      },
+    })
 
-  broadcast({ type: "rotation.changed", deviceId, ts: Date.now() })
+    broadcast({ type: "rotation.changed", deviceId, ts: Date.now() })
 
-  return NextResponse.json(
-    ok({
-      deviceId: config.deviceId,
-      wallpaperIds,
-      intervalSec,
-      activeFrom,
-      activeTo,
-      shuffle,
-      lastSwapAt: config.lastSwapAt?.toISOString() ?? null,
-      updatedAt: config.updatedAt.toISOString(),
-    }),
-  )
+    return NextResponse.json(
+      ok({
+        deviceId: config.deviceId,
+        wallpaperIds,
+        intervalSec,
+        activeFrom,
+        activeTo,
+        shuffle,
+        lastSwapAt: config.lastSwapAt?.toISOString() ?? null,
+        updatedAt: config.updatedAt.toISOString(),
+      }),
+    )
+  } catch (e) {
+    console.error("[kiki:rotation:put] error:", (e as Error)?.message)
+    return NextResponse.json(
+      err("db_unreachable", "Could not save rotation config. Please retry."),
+      { status: 503 },
+    )
+  }
 }

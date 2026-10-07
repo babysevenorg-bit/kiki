@@ -23,36 +23,44 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const wallpaper = await db.wallpaper.findUnique({ where: { id: wallpaperId } })
-  if (!wallpaper || !wallpaper.active) {
-    return NextResponse.json(err("not_found", "Wallpaper not found"), {
-      status: 404,
+  try {
+    const wallpaper = await db.wallpaper.findUnique({ where: { id: wallpaperId } })
+    if (!wallpaper || !wallpaper.active) {
+      return NextResponse.json(err("not_found", "Wallpaper not found"), {
+        status: 404,
+      })
+    }
+
+    const event = await db.downloadEvent.create({
+      data: {
+        wallpaperId,
+        deviceId: deviceId as string,
+      },
     })
+    const updated = await db.wallpaper.update({
+      where: { id: wallpaperId },
+      data: { downloads: { increment: 1 } },
+    })
+
+    broadcast({
+      type: "download.counted",
+      id: wallpaperId,
+      total: updated.downloads,
+      ts: Date.now(),
+    })
+
+    return NextResponse.json(
+      ok({
+        eventId: event.id,
+        wallpaperId,
+        totalDownloads: updated.downloads,
+      }),
+    )
+  } catch (e) {
+    console.error("[kiki:downloads] error:", (e as Error)?.message)
+    return NextResponse.json(
+      err("db_unreachable", "Could not record download. Please retry."),
+      { status: 503 },
+    )
   }
-
-  const event = await db.downloadEvent.create({
-    data: {
-      wallpaperId,
-      deviceId: deviceId as string,
-    },
-  })
-  const updated = await db.wallpaper.update({
-    where: { id: wallpaperId },
-    data: { downloads: { increment: 1 } },
-  })
-
-  broadcast({
-    type: "download.counted",
-    id: wallpaperId,
-    total: updated.downloads,
-    ts: Date.now(),
-  })
-
-  return NextResponse.json(
-    ok({
-      eventId: event.id,
-      wallpaperId,
-      totalDownloads: updated.downloads,
-    }),
-  )
 }

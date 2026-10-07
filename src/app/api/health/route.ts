@@ -16,7 +16,8 @@ export async function GET() {
     wallpaperCount = w
     categoryCount = c
     dbStatus = "ok"
-  } catch {
+  } catch (e) {
+    console.error("[kiki:health] db error:", (e as Error)?.message)
     // surfaced in the response
   }
 
@@ -25,7 +26,16 @@ export async function GET() {
     service: "kiki-backend",
     version: "1.0.0",
     time: new Date().toISOString(),
-    db: { status: dbStatus, wallpapers: wallpaperCount, categories: categoryCount },
+    db: {
+      status: dbStatus,
+      provider: "postgresql",
+      // Hint so the dashboard shows whether we hit Neon
+      host: process.env.DATABASE_URL
+        ? new URL(process.env.DATABASE_URL.replace(/^postgresql:/, "http:")).host
+        : "(unset)",
+      wallpapers: wallpaperCount,
+      categories: categoryCount,
+    },
     endpoints: [
       "GET  /api/health",
       "GET  /api/wallpapers?query=&category=&featured=&page=&limit=",

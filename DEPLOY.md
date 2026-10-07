@@ -34,13 +34,27 @@ The Kiki backend is the catalog server for the React Native mobile app:
 | POST | `/api/admin/categories` | Create/update/delete a category (`{ op: "create"\|"update"\|"delete", ... }`) |
 | POST | `/api/admin/generate` | Generate an HD wallpaper with the AI image service. Body: `{ prompt, size }` |
 
-## 3. Local dev
+## 3. Local dev (Neon Postgres)
+
+The schema is already set to `postgresql` in `prisma/schema.prisma`. You need a Neon project.
 
 ```bash
 bun install
-bun run db:push   # creates SQLite tables in dev
-bun run scripts/seed.ts   # seeds 18 HD wallpapers + 8 categories
-bun run dev       # http://localhost:3000
+# 1. Copy .env.example to .env and fill in your Neon pooled + direct URLs
+# 2. Inspect the Neon DB BEFORE pushing (don't blow away existing data):
+bun run scripts/inspect-neon.ts
+# 3. Push the schema (creates 7 tables: Wallpaper, Category, DownloadEvent,
+#    RotationConfig, AiPrompt, plus legacy User/Post):
+bun run db:push
+# 4. Seed the catalog (INSERT-ONLY — never overwrites existing rows):
+bun run scripts/seed.ts
+# 5. Start the dev server. If your shell has DATABASE_URL pre-set, unset it
+#    first so Bun's .env loader wins:
+unset DATABASE_URL || true
+bun run dev   # http://localhost:3000
+# 6. Verify against Neon:
+curl http://localhost:3000/api/health
+# → db.status: "ok", db.provider: "postgresql", db.host: "your-pooler.neon.tech"
 ```
 
 ## 4. Production: Vercel + Neon Postgres
@@ -52,25 +66,27 @@ bun run dev       # http://localhost:3000
    - `DATABASE_URL` — pooled (used by the app at runtime)
    - `DATABASE_URL_UNPOOLED` — direct (used by Prisma migrations)
 
-### Step 2 — Switch the Prisma provider to Postgres
-In `prisma/schema.prisma`, change:
+### Step 2 — Schema is already Postgres-ready
+
+`prisma/schema.prisma` is already configured for Neon Postgres:
 
 ```prisma
 datasource db {
-  provider = "postgresql"   // was "sqlite"
-  url      = env("DATABASE_URL")
-  directUrl = env("DATABASE_URL_UNPOOLED")   // for migrations
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")          // Neon pooled (PgBouncer)
+  directUrl = env("DATABASE_URL_UNPOOLED") // Neon direct (for migrations)
 }
 ```
 
-The rest of the schema is already Postgres-compatible. (The `tags` field is stored as a JSON string rather than `String[]` because SQLite has no native arrays — this is fine on Postgres too.)
+No edits needed. The `tags` field is stored as TEXT (JSON string) rather than `String[]` to keep the schema portable, parsed by `parseTags()` in `src/lib/kiki.ts`.
 
 ### Step 3 — Push the schema to Neon
 
 ```bash
-# Set DATABASE_URL and DATABASE_URL_UNPOOLED locally first
-bun run db:push
-bun run scripts/seed.ts   # populate your production catalog
+# Set DATABASE_URL and DATABASE_URL_UNPOOLED locally first (via .env)
+bun run scripts/inspect-neon.ts   # check for existing tables first
+bun run db:push                   # creates the 7 tables
+bun run scripts/seed.ts           # INSERT-ONLY seed (safe to re-run)
 ```
 
 ### Step 4 — Deploy on Vercel

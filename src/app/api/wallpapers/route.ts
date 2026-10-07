@@ -5,6 +5,7 @@ import {
   PAGE_SIZE_DEFAULT,
   PAGE_SIZE_MAX,
   cacheHeaders,
+  err,
   ok,
   toPublicWallpaper,
 } from "@/lib/kiki"
@@ -26,19 +27,23 @@ export async function GET(req: Request) {
     Math.max(1, Number(url.searchParams.get("limit") ?? PAGE_SIZE_DEFAULT)),
   )
 
+  // On Postgres, `contains` is case-sensitive by default. Force case-insensitive
+  // so the RN search box "tokyo" matches "Tokyo at Night".
   const where: {
     active: boolean
     featured?: boolean
-    category?: string
+    category?: { equals: string; mode: "insensitive" }
     OR?: Array<Record<string, unknown>>
   } = { active: true }
   if (featuredOnly) where.featured = true
-  if (category) where.category = category
+  if (category) {
+    where.category = { equals: category, mode: "insensitive" }
+  }
   if (query) {
     where.OR = [
-      { title: { contains: query } },
-      { tags: { contains: query } },
-      { category: { contains: query } },
+      { title: { contains: query, mode: "insensitive" } },
+      { tags: { contains: query, mode: "insensitive" } },
+      { category: { contains: query, mode: "insensitive" } },
     ]
   }
 
@@ -49,24 +54,32 @@ export async function GET(req: Request) {
       ? { downloads: "desc" as const }
       : { updatedAt: "desc" as const }
 
-  const [rows, total] = await Promise.all([
-    db.wallpaper.findMany({
-      where,
-      orderBy,
-      skip: (page - 1) * limit,
-      take: limit,
-    }),
-    db.wallpaper.count({ where }),
-  ])
+  try {
+    const [rows, total] = await Promise.all([
+      db.wallpaper.findMany({
+        where,
+        orderBy,
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      db.wallpaper.count({ where }),
+    ])
 
-  return NextResponse.json(
-    ok({
-      items: rows.map(toPublicWallpaper),
-      page,
-      limit,
-      total,
-      pages: Math.max(1, Math.ceil(total / limit)),
-    }),
-    { headers: cacheHeaders(60) },
-  )
+    return NextResponse.json(
+      ok({
+        items: rows.map(toPublicWallpaper),
+        page,
+        limit,
+        total,
+        pages: Math.max(1, Math.ceil(total / limit)),
+      }),
+      { headers: cacheHeaders(60) },
+    )
+  } catch (e) {
+    console.error("[kiki:wallpapers] error:", (e as Error)?.message)
+    return NextResponse.json(
+      err("db_unreachable", "Could not reach the catalog database. Please retry."),
+      { status: 503 },
+    )
+  }
 }
