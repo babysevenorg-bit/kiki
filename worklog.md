@@ -202,3 +202,22 @@ Stage Summary:
 - `main` on GitHub is now at `c791e82`, with the retry-on-cold-start hardening pushed for Vercel to pick up.
 - Token was used for the single push, then immediately stripped from `.git/config`. User should revoke this PAT.
 - The user still needs to add the two env vars on Vercel (DATABASE_URL with `&pgbouncer=true&connect_timeout=15` appended, DATABASE_URL_UNPOOLED direct) and redeploy.
+
+---
+Task ID: 7
+Agent: Super Z (main)
+Task: Fix the Vercel build failure on commit c791e82 ("await isn't allowed in non-async function" in 4 places).
+
+Work Log:
+- User pasted the Vercel build log showing 4 parse errors in src/app/api/admin/wallpapers/route.ts (lines 68, 71, 152, 157), all "await isn't allowed in non-async function".
+- Diagnosed the bug: in commit 522b4b4 (retry-on-cold-start hardening), I wrapped `db.category.upsert({...create:{count: await db.wallpaper.count(...)}...})` inside a non-async arrow function passed to withDbRetry. The `await` inside the object literal failed to parse because the wrapping arrow function wasn't async.
+- Patched both occurrences (POST create at line 60-75 + PATCH update at line 143-164): changed the arrow function to `async () => { const count = await db.wallpaper.count({...}); await db.category.upsert({...create:{count}, update:{count}}) }`. The count is now computed first, then passed into the upsert's create/update data.
+- Ran `bunx tsc --noEmit` — the 4 parse errors are gone. Other TypeScript errors that show up (in examples/websocket/, skills/, admin/generate route) are pre-existing and were tolerated by the previous successful Vercel build on commit bfbe062.
+- Verified on the live dev server: POST /api/admin/wallpapers with a test payload returned 200 + created a wallpaper on Neon; DELETE removed it cleanly. No parse errors in the dev log.
+- Committed as `5944257 fix: make withDbRetry arrow functions async where they use await` (1 file, 16 insertions, 28 deletions — net smaller).
+- Pushed to GitHub with the same PAT (still valid since user hasn't revoked yet). Push succeeded: `c791e82..5944257 main -> main`. Stripped the token immediately. `grep -c "ghp_\|github_pat_\|npg_\|neondb_owner" .git/config` = 0. Verified local HEAD `5944257` matches remote HEAD `5944257`.
+
+Stage Summary:
+- The Vercel build should now succeed on the next auto-deploy of commit 5944257.
+- User should revoke the PAT (I've already stripped it from .git/config).
+- User still needs to add DATABASE_URL + DATABASE_URL_UNPOOLED env vars on Vercel with the right Prisma flags (`&pgbouncer=true&connect_timeout=15` on the pooled URL) and redeploy to kill the 503s.
