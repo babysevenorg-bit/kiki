@@ -289,3 +289,39 @@ Stage Summary:
 - All committed and pushed to GitHub at `b0dcd2b`. Vercel will auto-deploy on the next webhook.
 - New env var required on Vercel: `KIKI_JWT_SECRET` (32 random hex bytes via `openssl rand -hex 32`).
 - Token was used for the single push, then stripped. User should revoke the PAT.
+
+---
+Task ID: 9
+Agent: Super Z (main)
+Task: User pushed their React Native app to GitHub on the feat/expo-mobile-app branch of babysevenorg-bit/kiki. Inspect it, write the integration code to connect it to the Neon DB-backed Kiki backend, and tell them what to do in VS Code.
+
+Work Log:
+- Used GitHub API (with the still-active PAT) to list user's repos. Found 3: kiki (TypeScript), Tradefort (TypeScript), baby-seven (TypeScript).
+- Inspected branches on the kiki repo — found `feat/expo-mobile-app` (sha 8e44e07) alongside the existing `main` (sha b0dcd2b).
+- Listed contents of the branch root — saw a new `mobile/` directory containing the RN app.
+- Cloned the branch locally to /tmp/kiki-mobile-inspect/ to read all the files.
+- Read the existing structure:
+  - `mobile/lib/catalog.ts` — already calls the API (POST /api/wallpapers) but URL is hardcoded to `https://kiki-gold.vercel.app` (guessed, not user's actual URL). Has an adapter mapping API shape → local Wallpaper type. Uses XHR for SSE.
+  - `mobile/lib/offline.ts` — downloads wallpapers to FileSystem for offline use. Good, no changes needed.
+  - `mobile/package.json` — Expo 57, React 19.2, RN 0.86. Has async-storage + file-system + notifications + intent-launcher. Missing: expo-image-picker.
+  - `mobile/env.example` — just `EXPO_PUBLIC_API_URL=https://kiki-gold.vercel.app`.
+  - `mobile/app/_layout.tsx` — Stack-based layout with notifications → lockscreen routing. ~25 lines.
+  - `mobile/app/index.tsx` — home screen with search + categories + Explore/Saved tabs. Uses `loadCatalog()` + `subscribeToCatalog()` + `downloadWallpaper()` from lib/offline.
+  - `mobile/app/tools.tsx` — wallpaper rotation tool, picks up to 8 offline wallpapers + interval.
+  - `mobile/app/lockscreen.tsx` — AI lockscreen feature (separate from this task).
+  - `mobile/plugins/KikiWallpaperService.kt` — Android live wallpaper service (native Kotlin).
+- Built the integration package at /home/z/my-project/download/kiki-mobile-integration/ with these files:
+  - `lib/kiki-api.ts` — NEW. Typed API client covering EVERY backend endpoint: catalog (list/get/featured/categories), downloads (record), rotation (get/put), SSE events (XHR-based), auth (register/login/logout/me), uploads (base64 fallback + multipart-ready), my-uploads, device-id, health-check. Includes cookie-based session management for RN (RN fetch doesn't auto-handle Set-Cookie for cross-origin, so the client manually captures the kiki_session cookie from auth responses, stores in AsyncStorage, and replays as Cookie header).
+  - `lib/catalog.ts` — REPLACES existing. Uses new client + adds `downloadWallpaperWithTracking` wrapper that saves locally AND posts to /api/downloads so the dashboard counter ticks.
+  - `app/auth.tsx` — NEW. Sign in / Sign up screen with Kiki dark + pink theme.
+  - `app/upload.tsx` — NEW. Image picker (expo-image-picker) + title/category/tags form + upload via base64 endpoint.
+  - `app/profile.tsx` — NEW. Shows user info + their uploads with pending/published/rejected badges + sign out button.
+  - `app/_layout.tsx` — REPLACES existing. Keeps the existing Stack + notifications flow. Includes a commented <Tabs> block for users who want a real bottom tab bar.
+  - `env.example` — REPLACES existing. Clear placeholder URL + instructions.
+  - `INTEGRATION.md` — Step-by-step guide: prereqs (backend env vars), 8 numbered steps for VS Code, file-by-file reference, troubleshooting, roadmap.
+- Did NOT push to the user's branch — the user controls their own branch. Saved the integration as a downloadable package under /home/z/my-project/download/kiki-mobile-integration/.
+
+Stage Summary:
+- The Kiki RN app integration package is ready at /home/z/my-project/download/kiki-mobile-integration/ — 7 files + 1 guide.
+- User needs to: (1) copy the files into mobile/lib/, mobile/app/, mobile/env.example in VS Code; (2) install expo-image-picker; (3) set the real Vercel URL in mobile/.env; (4) follow the 8 steps in INTEGRATION.md.
+- All integration files are downloadable from /home/z/my-project/download/kiki-mobile-integration/.
