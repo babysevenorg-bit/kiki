@@ -184,3 +184,21 @@ Stage Summary:
 - If the user is seeing 503s on a deployed Vercel app, the cause is almost certainly that Vercel doesn't have DATABASE_URL / DATABASE_URL_UNPOOLED env vars set yet — they need to add them and redeploy.
 - If they're seeing 503s on the preview URL (https://preview-<bot-id>.space-z.ai/), those were probably from a stale tab before the dev server picked up the new .env — a hard refresh should fix it.
 - The retry hardening (commit 522b4b4) is local-only; needs a push to GitHub so Vercel can pick it up. Token was already stripped from .git/config after the previous push, so a fresh PAT is needed to push.
+
+---
+Task ID: 6
+Agent: Super Z (main)
+Task: Push the retry-on-cold-start hardening (commit 522b4b4 → c791e82) to GitHub so Vercel picks it up on the next deploy.
+
+Work Log:
+- User provided a fresh GitHub fine-grained PAT (prefix `github_pat_` instead of `ghp_`).
+- Added the PAT to the remote URL using the `x-access-token:<token>@` form (works for both classic `ghp_` and fine-grained `github_pat_` tokens).
+- Ran `git push origin main` — succeeded: `bfbe062..c791e82 main -> main`. (The remote HEAD `c791e82` is ahead of my retry commit `522b4b4` because the sandbox's auto-watcher captured a few file changes as their own intermediate commits, but `522b4b4` is in the history.)
+- Immediately ran `git remote set-url origin "https://github.com/babysevenorg-bit/kiki.git"` to strip the token.
+- Verified secret scan: `grep -c "ghp_\|github_pat_\|npg_\|neondb_owner" .git/config` = 0 (clean — no secrets anywhere in git config).
+- Verified push with `git ls-remote origin main` (public HTTPS, no auth): returned `c791e8229d51296b3107252eec533ebc5b4e3de2 refs/heads/main`, matching local HEAD exactly.
+
+Stage Summary:
+- `main` on GitHub is now at `c791e82`, with the retry-on-cold-start hardening pushed for Vercel to pick up.
+- Token was used for the single push, then immediately stripped from `.git/config`. User should revoke this PAT.
+- The user still needs to add the two env vars on Vercel (DATABASE_URL with `&pgbouncer=true&connect_timeout=15` appended, DATABASE_URL_UNPOOLED direct) and redeploy.
