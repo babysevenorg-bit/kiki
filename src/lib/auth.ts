@@ -21,7 +21,9 @@ function getSecret(): Uint8Array {
   if (!s || s.length < 16) {
     // Dev fallback — never used in prod where KIKI_JWT_SECRET must be set
     if (process.env.NODE_ENV === "production") {
-      throw new Error("KIKI_JWT_SECRET must be set in production")
+      const err = new Error("KIKI_JWT_SECRET must be set in production. Add it on Vercel: Settings → Environment Variables → name=KIKI_JWT_SECRET, value=`openssl rand -hex 32` (32 hex chars), tick all environments, save, redeploy.") as Error & { code?: string }
+      err.code = "jwt_secret_missing"
+      throw err
     }
     console.warn("[kiki:auth] KIKI_JWT_SECRET not set — using dev fallback. Set it before deploying.")
     return new TextEncoder().encode("kiki-dev-secret-DO-NOT-USE-IN-PROD-change-me")

@@ -80,6 +80,15 @@ export async function POST(req: NextRequest) {
     )
   } catch (e) {
     console.error("[kiki:register] error:", (e as Error)?.message)
+    if ((e as Error & { code?: string }).code === "jwt_secret_missing") {
+      return NextResponse.json(
+        err(
+          "jwt_secret_missing",
+          "KIKI_JWT_SECRET is not set on Vercel. Add it: Settings → Environment Variables → name=KIKI_JWT_SECRET, value=`openssl rand -hex 32`, tick all environments, save, redeploy.",
+        ),
+        { status: 500 },
+      )
+    }
     return NextResponse.json(
       err("db_unreachable", "Could not create account. Please retry."),
       { status: 503 },
